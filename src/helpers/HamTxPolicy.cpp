@@ -5,23 +5,36 @@
 #include <ctype.h>
 
 #define HAM_PREFS_FILE     "/ham_prefs"
+#define HAM_PREFS_BACKUP   "/ham_prefs.bak"
 #define HAM_PREFS_MAGIC    0x48   // 'H'
-#define HAM_PREFS_VERSION  1
+#define HAM_PREFS_VERSION  2      // v2 = v1 record + CRC-16 trailer
 
 // The well-known MeshCore "Public" channel key: base64 izOH6cXN6mrJ5e26oRXNcg==
 static const uint8_t PUBLIC_CHANNEL_KEY[16] = {
   0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72
 };
 
-static bool containsNoCase(const char* haystack, const char* needle) {
-  size_t n = strlen(needle);
-  if (n == 0) return false;
-  for (const char* h = haystack; *h; h++) {
+// true if 'word' appears in 'text' as a whole word (case-insensitive): the characters
+// before and after it must not be letters or digits, so KF0WXX doesn't match KF0WXXX.
+static bool containsWordNoCase(const char* text, const char* word) {
+  size_t n = strlen(word);
+  if (n == 0 || text == NULL) return false;
+  for (const char* h = text; *h; h++) {
+    if (h != text && isalnum((unsigned char)h[-1])) continue;
     size_t i = 0;
-    while (i < n && h[i] && tolower((unsigned char)h[i]) == tolower((unsigned char)needle[i])) i++;
-    if (i == n) return true;
+    while (i < n && h[i] && tolower((unsigned char)h[i]) == tolower((unsigned char)word[i])) i++;
+    if (i == n && !isalnum((unsigned char)h[n])) return true;
   }
   return false;
+}
+
+// CRC-16/CCITT-FALSE
+static uint16_t crc16(const uint8_t* data, size_t len, uint16_t crc = 0xFFFF) {
+  while (len--) {
+    crc ^= (uint16_t)(*data++) << 8;
+    for (int b = 0; b < 8; b++) crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+  }
+  return crc;
 }
 
 static File openWrite(FILESYSTEM* fs, const char* filename) {
@@ -49,7 +62,8 @@ HamTxPolicy::HamTxPolicy() {
   _self_pub_key = NULL;
   _prefs.id_off = 0;
   _prefs.id_interval_secs = HAM_ID_INTERVAL_SECS;
-  _n_pub = _n_enc = _n_ids = 0;
+  _n_pub = _n_enc = _n_ids = _n_vetoed = 0;
+  _load_failed = false;
   _last_id_ms = _id_queued_ms = 0;
   _pub_since_id = false;
   rebuildKeys();
@@ -74,40 +88,84 @@ void HamTxPolicy::rebuildKeys() {
   }
 }
 
-void HamTxPolicy::load(FILESYSTEM* fs) {
-  if (!fs->exists(HAM_PREFS_FILE)) return;   // keep defaults
+// Reads one prefs file into 'out'. Returns 0 = missing/unreadable/corrupt,
+// 1 = old v1 file (no checksum), 2 = valid v2 file (checksum OK).
+static int readPrefsFile(FILESYSTEM* fs, const char* path, HamTxPrefs& out) {
+  if (!fs->exists(path)) return 0;
 #if defined(RP2040_PLATFORM)
-  File file = fs->open(HAM_PREFS_FILE, "r");
+  File file = fs->open(path, "r");
 #else
-  File file = fs->open(HAM_PREFS_FILE);
+  File file = fs->open(path);
 #endif
-  if (!file) return;
-
+  if (!file) return 0;
   uint8_t hdr[2];
-  HamTxPrefs tmp;
-  bool ok = file.read(hdr, 2) == 2 && hdr[0] == HAM_PREFS_MAGIC && hdr[1] == HAM_PREFS_VERSION;
-  ok = ok && file.read((uint8_t*)&tmp, sizeof(tmp)) == sizeof(tmp);
-  file.close();
-
-  if (ok) {
-    tmp.callsign[sizeof(tmp.callsign) - 1] = 0;
-    for (int i = 0; i < HAM_MAX_TAGS; i++) tmp.tags[i][HAM_TAG_MAX_LEN - 1] = 0;
-    tmp.pub_dbm = constrain(tmp.pub_dbm, -9, 30);
-    tmp.enc_dbm = constrain(tmp.enc_dbm, -9, 30);
-    if (tmp.id_off > 1) tmp.id_off = 0;
-    if (tmp.id_interval_secs < 60 || tmp.id_interval_secs > 600) tmp.id_interval_secs = HAM_ID_INTERVAL_SECS;
-    _prefs = tmp;
-    rebuildKeys();
+  uint8_t crc_bytes[2];
+  int result = 0;
+  if (file.read(hdr, 2) == 2 && hdr[0] == HAM_PREFS_MAGIC
+      && file.read((uint8_t*)&out, sizeof(out)) == sizeof(out)) {
+    if (hdr[1] == HAM_PREFS_VERSION) {
+      if (file.read(crc_bytes, 2) == 2) {
+        uint16_t stored = crc_bytes[0] | (crc_bytes[1] << 8);
+        uint16_t calc = crc16((const uint8_t*)&out, sizeof(out), crc16(hdr, 2));
+        if (stored == calc) result = 2;
+      }
+    } else if (hdr[1] == 1) {
+      result = 1;   // legacy, written by earlier MeshCore-Ham builds
+    }
   }
+  file.close();
+  return result;
+}
+
+static bool writePrefsFile(FILESYSTEM* fs, const char* path, const HamTxPrefs& prefs) {
+  File file = openWrite(fs, path);
+  if (!file) return false;
+  uint8_t hdr[2] = { HAM_PREFS_MAGIC, HAM_PREFS_VERSION };
+  uint16_t crc = crc16((const uint8_t*)&prefs, sizeof(prefs), crc16(hdr, 2));
+  uint8_t crc_bytes[2] = { (uint8_t)(crc & 0xFF), (uint8_t)(crc >> 8) };
+  bool ok = file.write(hdr, 2) == 2;
+  ok = ok && file.write((const uint8_t*)&prefs, sizeof(prefs)) == sizeof(prefs);
+  ok = ok && file.write(crc_bytes, 2) == 2;
+  file.close();
+  return ok;
+}
+
+void HamTxPolicy::load(FILESYSTEM* fs) {
+  HamTxPrefs tmp;
+  int kind = readPrefsFile(fs, HAM_PREFS_FILE, tmp);
+  bool from_backup = false;
+  if (kind != 2) {
+    HamTxPrefs bak;
+    if (readPrefsFile(fs, HAM_PREFS_BACKUP, bak) == 2) {   // main file damaged (e.g. power lost mid-save)
+      tmp = bak; kind = 2; from_backup = true;
+    }
+  }
+  if (kind == 0) {
+    // Missing or corrupt with no good backup: keep defaults, and if a file WAS there,
+    // make sure ham mode stays OFF rather than trusting anything in it.
+    if (fs->exists(HAM_PREFS_FILE) || fs->exists(HAM_PREFS_BACKUP)) {
+      _prefs.enabled = 0;
+      _load_failed = true;
+    }
+    return;
+  }
+  tmp.callsign[sizeof(tmp.callsign) - 1] = 0;
+  for (int i = 0; i < HAM_MAX_TAGS; i++) tmp.tags[i][HAM_TAG_MAX_LEN - 1] = 0;
+  tmp.pub_dbm = constrain(tmp.pub_dbm, -9, 30);
+  tmp.enc_dbm = constrain(tmp.enc_dbm, -9, 30);
+  if (tmp.enabled > 1) tmp.enabled = 0;
+  if (tmp.id_off > 1) tmp.id_off = 0;
+  if (tmp.id_interval_secs < 60 || tmp.id_interval_secs > 600) tmp.id_interval_secs = HAM_ID_INTERVAL_SECS;
+  _prefs = tmp;
+  rebuildKeys();
+  if (kind == 1 || from_backup) save(fs);   // upgrade old file / repair main file
 }
 
 bool HamTxPolicy::save(FILESYSTEM* fs) {
-  File file = openWrite(fs, HAM_PREFS_FILE);
-  if (!file) return false;
-  uint8_t hdr[2] = { HAM_PREFS_MAGIC, HAM_PREFS_VERSION };
-  bool ok = file.write(hdr, 2) == 2;
-  ok = ok && file.write((const uint8_t*)&_prefs, sizeof(_prefs)) == sizeof(_prefs);
-  file.close();
+  // Two copies: if power is lost while writing one, the other is still valid.
+  bool ok = writePrefsFile(fs, HAM_PREFS_FILE, _prefs);
+  ok = writePrefsFile(fs, HAM_PREFS_BACKUP, _prefs) && ok;
+  if (ok) _load_failed = false;
   return ok;
 }
 
@@ -155,7 +213,7 @@ HamTxClass HamTxPolicy::classify(const mesh::Packet* pkt) const {
 const char* HamTxPolicy::inactiveReason(const char* node_name) const {
   if (!_prefs.enabled) return "disabled";
   if (_prefs.callsign[0] == 0) return "no callsign";
-  if (!containsNoCase(node_name, _prefs.callsign)) return "name lacks callsign";
+  if (!containsWordNoCase(node_name, _prefs.callsign)) return "name lacks callsign";
   return NULL;
 }
 
@@ -169,7 +227,8 @@ bool HamTxPolicy::isSelfAdvert(const mesh::Packet* pkt) const {
       && memcmp(pkt->payload, _self_pub_key, PUB_KEY_SIZE) == 0;
 }
 
-int8_t HamTxPolicy::selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms) {
+int8_t HamTxPolicy::selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms, bool& must_apply) {
+  must_apply = false;
   if (isSelfAdvert(pkt)) {
     // every advert of ours carries our name (and callsign): restart the station ID timer
     _last_id_ms = now_ms;
@@ -180,6 +239,7 @@ int8_t HamTxPolicy::selectPower(const mesh::Packet* pkt, const char* node_name, 
   if (!isActive(node_name)) return default_dbm;
   if (classify(pkt) == HAM_TX_ENCRYPTED) {
     _n_enc++;
+    must_apply = true;   // never let encrypted traffic go out at whatever power the radio was left at
     return _prefs.enc_dbm;
   }
   _n_pub++;
@@ -245,8 +305,21 @@ void HamTxPolicy::listChannels(char* reply) const {
   }
 }
 
-bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* node_name, bool& dirty) {
+// Explains why ham mode is WAITING on the callsign/name check (reply < 160 chars).
+void HamTxPolicy::nameProblem(char* reply, const char* prefix, const char* advert_name, const char* full_name) const {
+  if (containsWordNoCase(full_name, _prefs.callsign)) {
+    // in the name, but cut off (or split) in what adverts actually send
+    sprintf(reply, "%s%s gets cut off in adverts (they send '%s'). Put it first: set name %s ...",
+      prefix, _prefs.callsign, advert_name, _prefs.callsign);
+  } else {
+    sprintf(reply, "%snode name must include %s as its own word. Type: set name %s ...",
+      prefix, _prefs.callsign, _prefs.callsign);
+  }
+}
+
+bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* node_name, const char* full_name, bool& dirty) {
   dirty = false;
+  if (full_name == NULL) full_name = node_name;
   const char* p = command;
   if (!takeWord(p, "ham")) return false;
 
@@ -267,7 +340,13 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
     } else if (_prefs.callsign[0] == 0) {
       strcpy(reply, "WAITING - no callsign set. Type: ham callsign YOURCALL");
     } else {
-      sprintf(reply, "WAITING - node name must include %s. Type: set name %s ...", _prefs.callsign, _prefs.callsign);
+      nameProblem(reply, "WAITING - ", node_name, full_name);
+    }
+    if (_load_failed && strlen(reply) < 110) strcat(reply, " (settings file was damaged - re-enter settings)");
+    if (_n_vetoed > 0 && strlen(reply) < 100) {
+      char w[80];
+      sprintf(w, " WARNING: %lu private pkts blocked, radio rejected power %d", (unsigned long)_n_vetoed, _prefs.enc_dbm);
+      strcat(reply, w);
     }
 
   } else if (takeWord(p, "help")) {
@@ -279,7 +358,7 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
     const char* why = inactiveReason(node_name);
     if (why == NULL) strcpy(reply, "OK - ham mode ON");
     else if (_prefs.callsign[0] == 0) strcpy(reply, "OK - but still WAITING: set callsign with 'ham callsign YOURCALL'");
-    else sprintf(reply, "OK - but still WAITING: node name must include %s", _prefs.callsign);
+    else nameProblem(reply, "OK - but WAITING: ", node_name, full_name);
 
   } else if (takeWord(p, "off")) {
     _prefs.enabled = 0; dirty = true;
@@ -299,8 +378,8 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
       } else {
         strcpy(_prefs.callsign, tmp);
         dirty = true;
-        if (containsNoCase(node_name, _prefs.callsign)) sprintf(reply, "OK - callsign set to %s", _prefs.callsign);
-        else sprintf(reply, "OK - callsign %s. Now put it in the node name: set name %s ...", _prefs.callsign, _prefs.callsign);
+        if (containsWordNoCase(node_name, _prefs.callsign)) sprintf(reply, "OK - callsign set to %s", _prefs.callsign);
+        else nameProblem(reply, "OK - but ", node_name, full_name);
       }
     }
 
@@ -380,7 +459,8 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
     }
 
   } else if (takeWord(p, "stats")) {
-    sprintf(reply, "Sent since boot: %lu public, %lu private, %lu IDs", (unsigned long)_n_pub, (unsigned long)_n_enc, (unsigned long)_n_ids);
+    sprintf(reply, "Sent since boot: %lu public, %lu private, %lu IDs, %lu blocked (power change failed)",
+      (unsigned long)_n_pub, (unsigned long)_n_enc, (unsigned long)_n_ids, (unsigned long)_n_vetoed);
 
   } else {
     strcpy(reply, "Unknown ham command. Type: ham help");

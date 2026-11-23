@@ -89,7 +89,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   ClientACL  acl;
   CommonCLI _cli;
   HamTxPolicy ham;          // per-packet TX power for Part 97 / Part 15 split
-  int8_t ham_cur_dbm;       // power currently programmed into the radio
+  char ham_advert_name[MAX_ADVERT_DATA_SIZE];   // node name as adverts send it
+  const char* hamAdvertName();
+  bool ham_power_touched = false;   // we've set a ham power on the radio since 'tx' was last applied
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   uint8_t reply_path[MAX_PATH_SIZE];
   uint8_t reply_path_len;
@@ -131,7 +133,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
 
 protected:
-  void onBeforeTransmit(mesh::Packet* packet) override;
+  bool onBeforeTransmit(mesh::Packet* packet) override;
 
   float getAirtimeBudgetFactor() const override {
     return _prefs.airtime_factor;

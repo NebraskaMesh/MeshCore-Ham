@@ -726,7 +726,6 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
-  ham_cur_dbm = _prefs.tx_power_dbm;
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
 
   board.attachDynamicPrefs(_prefs.getCustom());
@@ -842,7 +841,6 @@ void MyMesh::dumpLogFile() {
 
 void MyMesh::setTxPower(int8_t power_dbm) {
   radio_driver.setTxPower(power_dbm);
-  ham_cur_dbm = power_dbm;
 }
 
 bool MyMesh::setRxBoostedGain(bool enable) {
@@ -991,19 +989,45 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     strcpy(reply, "ERR - repeat now deprecated");
   } else if (memcmp(command, "ham", 3) == 0 && (command[3] == 0 || command[3] == ' ')) {
     bool dirty = false;
-    ham.handleCommand(command, reply, _prefs.node_name, dirty);
+    ham.handleCommand(command, reply, hamAdvertName(), _prefs.node_name, dirty);
     if (dirty && !ham.save(_fs)) strcpy(reply, "Err - failed to save ham prefs");
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
 
-void MyMesh::onBeforeTransmit(mesh::Packet* packet) {
-  int8_t dbm = ham.selectPower(packet, _prefs.node_name, _prefs.tx_power_dbm, _ms->getMillis());
-  if (dbm != ham_cur_dbm) {
-    radio_driver.setTxPower(dbm);
-    ham_cur_dbm = dbm;
+// The node name exactly as our adverts transmit it (long names get cut to fit). Ham mode
+// requires the callsign to be in THIS, so every station-ID advert really carries it.
+const char* MyMesh::hamAdvertName() {
+  uint8_t app_data[MAX_ADVERT_DATA_SIZE];
+  uint8_t len = _cli.buildAdvertData(ADV_TYPE_ROOM, app_data);
+  AdvertDataParser parser(app_data, len);
+  StrHelper::strncpy(ham_advert_name, parser.getName(), sizeof(ham_advert_name));
+  return ham_advert_name;
+}
+
+bool MyMesh::onBeforeTransmit(mesh::Packet* packet) {
+  if (!ham.prefs().enabled && !ham_power_touched) return true;   // ham mode off: stock behaviour
+
+  const char* name = hamAdvertName();
+  bool must_apply;
+  int8_t dbm = ham.selectPower(packet, name, _prefs.tx_power_dbm, _ms->getMillis(), must_apply);
+  if (!ham.isActive(name)) {
+    if (ham_power_touched) {            // we changed the power earlier: put the normal 'tx' power back
+      radio_driver.setTxPower(_prefs.tx_power_dbm);
+      ham_power_touched = false;
+    }
+    return true;
   }
+  // Set the power for EVERY packet while active: 'set tx' and other CLI paths can change the
+  // radio's power behind our back, so a cached value could let encrypted traffic out at ham power.
+  radio_driver.setTxPower(dbm);
+  ham_power_touched = true;
+  if (must_apply && !hamTxPowerOk(radio_driver)) {
+    ham.onTxVetoed();   // radio refused the private power: don't risk sending at the wrong power
+    return false;
+  }
+  return true;
 }
 
 bool MyMesh::saveFilter(ClientInfo* client) {
@@ -1013,7 +1037,7 @@ bool MyMesh::saveFilter(ClientInfo* client) {
 void MyMesh::loop() {
   mesh::Mesh::loop();
 
-  if (ham.isStationIdDue(_prefs.node_name, _ms->getMillis())) {   // ham station ID: zero-hop advert carries name/callsign
+  if (ham.idPending() && ham.isStationIdDue(hamAdvertName(), _ms->getMillis())) {   // ham station ID: zero-hop advert carries name/callsign
     mesh::Packet* id_pkt = createSelfAdvert();
     if (id_pkt) {
       sendZeroHop(id_pkt, (uint32_t)0, _prefs.path_hash_mode + 1);

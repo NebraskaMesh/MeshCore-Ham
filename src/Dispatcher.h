@@ -165,8 +165,9 @@ protected:
   /**
    * \brief  called immediately before 'packet' is handed to the radio for transmit.
    *         Sub-classes can use this to adjust radio settings (eg. TX power) per packet.
+   * \returns false to drop the packet instead of sending it (eg. a required power change failed).
    */
-  virtual void onBeforeTransmit(Packet* packet) { }
+  virtual bool onBeforeTransmit(Packet* packet) { return true; }
   virtual const char* getLogDateTime() { return ""; }
 
   virtual float getAirtimeBudgetFactor() const;

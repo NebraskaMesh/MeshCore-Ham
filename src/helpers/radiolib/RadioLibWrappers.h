@@ -15,6 +15,7 @@ class RadioLibWrapper : public mesh::Radio {
 protected:
   PhysicalLayer* _radio;
   mesh::MainBoard* _board;
+  bool _tx_power_ok = true;
   uint32_t n_recv, n_sent, n_recv_errors;
   int16_t _noise_floor, _threshold;
   bool _cad_enabled;
@@ -50,6 +51,7 @@ public:
   virtual void setParams(float freq, float bw, uint8_t sf, uint8_t cr) = 0;
   uint32_t getRngSeed();
   void setTxPower(int8_t dbm);
+  bool lastTxPowerOk() const { return _tx_power_ok; }   // did the radio accept the last setTxPower()?
 
   virtual float getCurrentRSSI() =0;
   virtual uint8_t getSpreadingFactor() const { return LORA_SF; }

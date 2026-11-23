@@ -46,6 +46,12 @@ This includes packets your node is only **passing along** for other people, whic
 
 If the firmware can't tell for sure that a packet is public, it treats it as **private**. That's the safe choice.
 
+**Built-in safety checks:**
+
+- **Your callsign must really go out on air.** Adverts only have room for the first 31 characters of the node name (23 if you share your location). Ham mode only switches on if your callsign is inside the part adverts actually send, and it has to be a whole word, so `KF0WXX` doesn't count inside `KF0WXXX`.
+- **Private packets never go out at the wrong power.** The firmware sets the power before every packet. If the radio refuses the private power level, that private packet is **dropped instead of sent**, and `ham` shows a warning.
+- **Damaged settings turn ham mode off.** Settings are saved twice with a checksum. If one copy gets damaged (for example by a power cut while saving), the other is used. If both are damaged, ham mode stays **OFF** until you set it up again.
+
 ---
 
 ## What counts as public and what counts as private
@@ -123,8 +129,8 @@ Your settings are **kept** when you update. Ham settings are saved in their own 
 
 Connect to the node's **serial console**. Use any serial terminal at 115200 baud, PlatformIO's **Monitor** button, or log in as admin from the MeshCore app's remote management. Then type:
 
-**1. Put your callsign in the node's name.**
-Adverts carry the node name, so this is how your node identifies itself on air.
+**1. Put your callsign in the node's name, near the start.**
+Adverts carry the node name, so this is how your node identifies itself on air. Adverts cut long names short (31 characters, or 23 with location), so put the callsign first.
 ```
 set name KF0WXX Waverly
 ```
@@ -179,7 +185,7 @@ All commands start with `ham`. They work over the serial console and over remote
 | `ham id` | Shows the station ID setting. | `ham id` |
 | `ham id N` | Sends a station ID advert every N minutes (1 to 10) while you're sending public traffic. Default 9. | `ham id 9` |
 | `ham id off` / `ham id on` | Turns the automatic station ID off or back on. | `ham id off` |
-| `ham stats` | Shows how many public and private packets, and how many IDs, were sent since the last reboot. | `ham stats` |
+| `ham stats` | Shows how many public and private packets and IDs were sent since the last reboot, and how many private packets were blocked because the radio refused the private power. | `ham stats` |
 
 **What the status words mean:**
 
@@ -187,7 +193,7 @@ All commands start with `ham`. They work over the serial console and over remote
 |---|---|
 | **ON** | Working. Public and private packets use their own power levels. |
 | **OFF** | Turned off with `ham off` (or never turned on). Every packet uses the normal `set tx` power. |
-| **WAITING** | You typed `ham on`, but something is missing: either no callsign is set, or the node name doesn't include the callsign. Until you fix it, every packet uses the normal `set tx` power. |
+| **WAITING** | You typed `ham on`, but something is missing: no callsign is set, the node name doesn't include the callsign as its own word, or the callsign gets cut off in adverts. Until you fix it, every packet uses the normal `set tx` power. |
 
 <details>
 <summary>Older command names (still work)</summary>
@@ -220,7 +226,16 @@ All commands start with `ham`. They work over the serial console and over remote
 Run `ham callsign YOURCALL`.
 
 **`ham` says `WAITING - node name must include ...`**
-The node name has to contain your callsign, for example `set name KF0WXX Waverly`. Upper or lower case doesn't matter.
+The node name has to contain your callsign as its own word, for example `set name KF0WXX Waverly`. Upper or lower case doesn't matter.
+
+**`ham` says `... gets cut off in adverts`**
+Your name is too long, so adverts drop the end of it, including your callsign. Move the callsign to the start: `set name KF0WXX Waverly Backbone`.
+
+**`ham` shows `WARNING: ... private pkts blocked`**
+The radio refused your private power setting, so the node dropped those private packets rather than risk sending them at ham power. Pick a value your board supports, for example `ham private 10`.
+
+**`ham` says `settings file was damaged`**
+Both saved copies of the ham settings were damaged, so ham mode was switched off for safety. Set it up again (callsign, powers, channels, `ham on`).
 
 **My node sends more adverts than before.**
 That's the automatic station ID. A busy node sends at most one zero-hop advert every 9 minutes. Use `ham id 10` for a little less, or `ham id off` to turn it off.
@@ -269,12 +284,14 @@ This firmware gives you the tools; how you use them is up to you. **It is not le
 
 Based on [MeshCore](https://github.com/meshcore-dev/MeshCore) by the MeshCore developers. MIT License, see [license.txt](license.txt).
 Ham power feature by KF0WXX for the [Nebraska Mesh](https://nebraskamesh.net) community.
+The whole-word callsign check, the advert-name length check, blocking private packets when the radio rejects a power change, and checksummed settings were inspired by [jhuebert's repeater-filter firmware](https://github.com/jhuebert/MeshCore), which adapted this ham mode.
 
 <details>
 <summary>For developers: where the code lives</summary>
 
-- `src/helpers/HamTxPolicy.h` / `.cpp`: decides public or private for each packet, the `ham` commands, and saving settings (to `/ham_prefs`).
-- `src/Dispatcher.h` / `.cpp`: adds the `onBeforeTransmit()` hook, which runs just before each packet is sent.
+- `src/helpers/HamTxPolicy.h` / `.cpp`: decides public or private for each packet, the `ham` commands, and saving settings (to `/ham_prefs` + `/ham_prefs.bak`, each with a CRC-16).
+- `src/helpers/radiolib/RadioLibWrappers.*`: `lastTxPowerOk()` reports whether the radio accepted the last power change.
+- `src/Dispatcher.h` / `.cpp`: adds the `onBeforeTransmit()` hook, which runs just before each packet is sent and can drop it by returning `false`.
 - `src/Mesh.h` / `.cpp`: `sendZeroHop()` takes an optional path hash size.
 - `examples/simple_repeater/MyMesh.*`, `examples/simple_room_server/MyMesh.*`: connect the pieces together.
 

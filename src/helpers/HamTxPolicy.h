@@ -19,10 +19,15 @@
  * only forwarding, which is what matters for a repeater.
  *
  * Fail-safe rules:
- *   - Ham mode is only ACTIVE when enabled AND a callsign is set AND the node name contains
- *     that callsign (so adverts carry the ID). If not active, every packet uses the normal
- *     'set tx' power.
+ *   - Ham mode is only ACTIVE when enabled AND a callsign is set AND the callsign appears as a
+ *     whole word in the name *as actually sent in adverts* (adverts cut long names to 31 bytes,
+ *     or 23 with a location). The owner passes that advert name in as 'node_name'.
+ *     If not active, every packet uses the normal 'set tx' power.
  *   - Anything that can't be positively identified as public is ENCRYPTED.
+ *   - Encrypted packets are only sent if the radio confirms it accepted the private power;
+ *     otherwise the owner drops the packet (see selectPower's must_apply).
+ *   - Settings are stored with a CRC-16 in two copies (/ham_prefs + /ham_prefs.bak). If both
+ *     are damaged, ham mode stays OFF.
  *
  * Station ID ("ham id", on by default): every advert carries the node name, and so the
  * callsign. While ham mode is ON, if the node has sent anything at public power since its
@@ -54,6 +59,14 @@
 #ifndef HAM_ENC_TX_POWER
   #define HAM_ENC_TX_POWER     10
 #endif
+/**
+ * Did the radio accept the last setTxPower()? Uses RadioLibWrapper::lastTxPowerOk() when the
+ * driver has it; drivers without it (e.g. ESP-NOW) are assumed OK.
+ */
+template<typename R> static inline auto hamTxPowerOk(R& r, int) -> decltype(r.lastTxPowerOk()) { return r.lastTxPowerOk(); }
+template<typename R> static inline bool hamTxPowerOk(R&, long) { return true; }
+template<typename R> static inline bool hamTxPowerOk(R& r) { return hamTxPowerOk(r, 0); }
+
 enum HamTxClass : uint8_t {
   HAM_TX_PUBLIC    = 0,
   HAM_TX_ENCRYPTED = 1,
@@ -82,7 +95,8 @@ class HamTxPolicy {
   KnownKey _tag_keys[HAM_MAX_TAGS];
 
   // stats
-  uint32_t _n_pub, _n_enc, _n_ids;
+  uint32_t _n_pub, _n_enc, _n_ids, _n_vetoed;
+  bool _load_failed;             // a settings file existed but was damaged (ham mode forced OFF)
 
   // station ID state
   unsigned long _last_id_ms;     // when our last advert went out (0 = boot)
@@ -94,6 +108,7 @@ class HamTxPolicy {
   void rebuildKeys();
   bool matchesKnownKey(const uint8_t* payload, int len) const;
   int  findTag(const char* name) const;
+  void nameProblem(char* reply, const char* prefix, const char* advert_name, const char* full_name) const;
   void listChannels(char* reply) const;
 
 public:
@@ -117,17 +132,22 @@ public:
    * Called just before a packet goes on air. Returns the TX power (dBm) to use.
    * When not active, returns 'default_dbm'.
    */
-  int8_t selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms);
+  int8_t selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms, bool& must_apply);
+
+  /** the owner dropped a packet because the radio rejected the power change */
+  void onTxVetoed() { _n_vetoed++; }
 
   /** true when the owner should send a zero-hop self advert as the station ID */
   bool isStationIdDue(const char* node_name, unsigned long now_ms);
+  /** cheap pre-check so the owner only builds the advert name when an ID could be due */
+  bool idPending() const { return _pub_since_id && !_prefs.id_off && _prefs.enabled; }
   void onStationIdQueued(unsigned long now_ms) { _id_queued_ms = now_ms ? now_ms : 1; }
 
   /**
    * Handles 'ham ...' CLI commands. Returns true if the command was a ham command (reply filled in).
    * Sets 'dirty' when prefs changed and should be saved.
    */
-  bool handleCommand(const char* command, char* reply, const char* node_name, bool& dirty);
+  bool handleCommand(const char* command, char* reply, const char* node_name, const char* full_name, bool& dirty);
 
   const HamTxPrefs& prefs() const { return _prefs; }
 };

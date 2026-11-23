@@ -324,7 +324,13 @@ void Dispatcher::checkSend() {
     } else {
       memcpy(&raw[len], outbound->payload, outbound->payload_len); len += outbound->payload_len;
 
-      onBeforeTransmit(outbound);
+      if (!onBeforeTransmit(outbound)) {
+        MESH_DEBUG_PRINTLN("%s Dispatcher::checkSend(): packet dropped by onBeforeTransmit()", getLogDateTime());
+        logTxFail(outbound, outbound->getRawLength());
+        releasePacket(outbound);  // return to pool
+        outbound = NULL;
+        return;
+      }
 
       uint32_t max_airtime = _radio->getEstAirtimeFor(len)*3/2;
       outbound_start = _ms->getMillis();

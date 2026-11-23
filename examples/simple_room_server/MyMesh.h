@@ -103,7 +103,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   ClientACL acl;
   CommonCLI _cli;
   HamTxPolicy ham;          // per-packet TX power for Part 97 / Part 15 split
-  int8_t ham_cur_dbm;       // power currently programmed into the radio
+  char ham_advert_name[MAX_ADVERT_DATA_SIZE];   // node name as adverts send it
+  const char* hamAdvertName();
+  bool ham_power_touched = false;   // we've set a ham power on the radio since 'tx' was last applied
   unsigned long dirty_contacts_expiry;
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   unsigned long next_push;
@@ -132,7 +134,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   int handleRequest(ClientInfo* sender, uint32_t sender_timestamp, uint8_t* payload, size_t payload_len);
 
 protected:
-  void onBeforeTransmit(mesh::Packet* packet) override;
+  bool onBeforeTransmit(mesh::Packet* packet) override;
 
   float getAirtimeBudgetFactor() const override {
     return _prefs.airtime_factor;
