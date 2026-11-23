@@ -16,13 +16,14 @@ That lets a licensed amateur radio operator send public traffic at **ham power**
 
 1. [How it works](#how-it-works)
 2. [What counts as public and what counts as private](#what-counts-as-public-and-what-counts-as-private)
-3. [Install the firmware](#install-the-firmware)
-4. [Set it up (5 steps)](#set-it-up-5-steps)
-5. [Command list](#command-list)
-6. [Check that it's working](#check-that-its-working)
-7. [Troubleshooting & FAQ](#troubleshooting--faq)
-8. [Other differences from stock MeshCore](#other-differences-from-stock-meshcore)
-9. [Your responsibility](#your-responsibility)
+3. [Station ID (automatic)](#station-id-automatic)
+4. [Install the firmware](#install-the-firmware)
+5. [Set it up (5 steps)](#set-it-up-5-steps)
+6. [Command list](#command-list)
+7. [Check that it's working](#check-that-its-working)
+8. [Troubleshooting & FAQ](#troubleshooting--faq)
+9. [Other differences from stock MeshCore](#other-differences-from-stock-meshcore)
+10. [Your responsibility](#your-responsibility)
 
 ---
 
@@ -64,6 +65,31 @@ The Public channel's key is published for everyone, so anyone can read it. The s
 The firmware can only check a #hashtag channel if it knows the channel's name. So you list the ones you want sent at public power.
 
 The firmware also checks each message against the real key before calling it public. A private channel that happens to look like the Public channel still goes out at private power.
+
+---
+
+## Station ID (automatic)
+
+Every MeshCore advert carries your node's name, and your name includes your callsign, so **an advert works as your station ID.**
+
+While ham mode is **ON**, the firmware makes sure your callsign goes out regularly:
+
+```
+   public traffic sent ──► has it been 9 minutes since our last advert?
+                                 │                     │
+                                YES                    NO
+                                 │                     │
+                     send a zero-hop advert       wait, check again
+                       (= station ID)
+```
+
+- **Any advert resets the timer.** That includes your scheduled ones, the ones you send by hand, and the automatic ID itself. So if your node adverts at the end of a burst of traffic, the clock starts over from there.
+- **Quiet node = no extra adverts.** If your node hasn't sent anything at public power since its last advert, it doesn't send an ID. An idle repeater adds zero traffic.
+- **Busy node = one short advert every 9 minutes at most.** It's a zero-hop advert, so only your direct neighbours hear it and nobody repeats it.
+- **Why 9 minutes and not 10?** The rule is "at least every 10 minutes." 9 minutes leaves room for the advert to wait its turn on a busy channel and still go out in time. Change it with `ham id N` (1 to 10 minutes). Choosing 10 actually uses 9.5 minutes for the same reason.
+- **Private-only traffic never triggers an ID**, because it's sent at unlicensed power.
+
+Don't want it? `ham id off` turns it off, and then only your normal adverts go out.
 
 ---
 
@@ -127,7 +153,7 @@ ham
 ```
 You should see:
 ```
-ON - callsign KF0WXX, public power 22, private power 15, extra channels 1
+ON - callsign KF0WXX, public power 22, private power 15, extra channels 1, ID 9 min
 ```
 
 If you see **`WAITING`** instead, the message says exactly what's missing. See [Troubleshooting](#troubleshooting--faq).
@@ -150,7 +176,10 @@ All commands start with `ham`. They work over the serial console and over remote
 | `ham channel add #name` | Sends that #hashtag channel at **public** power. Up to 8 channels. | `ham channel add #nebraska` |
 | `ham channel remove #name` | Takes a #hashtag channel off the list. It goes back to **private** power. | `ham channel remove #nebraska` |
 | `ham channels` | Lists every channel that uses public power. | `ham channels` |
-| `ham stats` | Shows how many public and private packets were sent since the last reboot. | `ham stats` |
+| `ham id` | Shows the station ID setting. | `ham id` |
+| `ham id N` | Sends a station ID advert every N minutes (1 to 10) while you're sending public traffic. Default 9. | `ham id 9` |
+| `ham id off` / `ham id on` | Turns the automatic station ID off or back on. | `ham id off` |
+| `ham stats` | Shows how many public and private packets, and how many IDs, were sent since the last reboot. | `ham stats` |
 
 **What the status words mean:**
 
@@ -193,6 +222,9 @@ Run `ham callsign YOURCALL`.
 **`ham` says `WAITING - node name must include ...`**
 The node name has to contain your callsign, for example `set name KF0WXX Waverly`. Upper or lower case doesn't matter.
 
+**My node sends more adverts than before.**
+That's the automatic station ID. A busy node sends at most one zero-hop advert every 9 minutes. Use `ham id 10` for a little less, or `ham id off` to turn it off.
+
 **My #hashtag channel still goes out at private power.**
 - Check `ham channels` to see whether it's on the list.
 - The name must match the app **exactly**, including capital letters: `#Nebraska` and `#nebraska` are different channels.
@@ -217,7 +249,7 @@ These are small changes that came up while running this firmware on a real netwo
 
 - **Zero-hop advert interval defaults to 240 minutes** on new installs. The flood advert stays at 47 hours. Stock MeshCore sends a zero-hop advert every 2 minutes until you change it. Change yours any time with `set advert.interval` and `set flood.advert.interval`.
 - **Zero-hop adverts carry your 2- or 3-byte path setting.** In stock MeshCore, only flood adverts carry the `set path.hash.mode` setting, so zero-hop adverts always showed up as "1 byte" in analyzers. Now both kinds carry your setting.
-- **This firmware sends no extra adverts of its own.** Adverts go out only on your normal schedule, or when you send one manually.
+- **Automatic station ID** (only while ham mode is ON): a zero-hop advert at most every 9 minutes, only while you're sending public traffic. See [Station ID](#station-id-automatic).
 
 `ver` shows the firmware version as **`v1.18.0-ham`**.
 
@@ -246,6 +278,6 @@ Ham power feature by KF0WXX for the [Nebraska Mesh](https://nebraskamesh.net) co
 - `src/Mesh.h` / `.cpp`: `sendZeroHop()` takes an optional path hash size.
 - `examples/simple_repeater/MyMesh.*`, `examples/simple_room_server/MyMesh.*`: connect the pieces together.
 
-Optional build flags to pre-load settings on fresh installs: `-D HAM_ENABLED=1`, `-D HAM_CALLSIGN='"KF0WXX"'`, `-D HAM_PUB_TX_POWER=22`, `-D HAM_ENC_TX_POWER=15`, `-D HAM_MAX_TAGS=8`.
+Optional build flags to pre-load settings on fresh installs: `-D HAM_ENABLED=1`, `-D HAM_CALLSIGN='"KF0WXX"'`, `-D HAM_PUB_TX_POWER=22`, `-D HAM_ENC_TX_POWER=15`, `-D HAM_ID_INTERVAL_SECS=540`, `-D HAM_MAX_TAGS=8`.
 
 </details>

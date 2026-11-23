@@ -47,7 +47,11 @@ HamTxPolicy::HamTxPolicy() {
   _prefs.enabled = HAM_ENABLED;
 #endif
   _self_pub_key = NULL;
-  _n_pub = _n_enc = 0;
+  _prefs.id_off = 0;
+  _prefs.id_interval_secs = HAM_ID_INTERVAL_SECS;
+  _n_pub = _n_enc = _n_ids = 0;
+  _last_id_ms = _id_queued_ms = 0;
+  _pub_since_id = false;
   rebuildKeys();
 }
 
@@ -90,6 +94,8 @@ void HamTxPolicy::load(FILESYSTEM* fs) {
     for (int i = 0; i < HAM_MAX_TAGS; i++) tmp.tags[i][HAM_TAG_MAX_LEN - 1] = 0;
     tmp.pub_dbm = constrain(tmp.pub_dbm, -9, 30);
     tmp.enc_dbm = constrain(tmp.enc_dbm, -9, 30);
+    if (tmp.id_off > 1) tmp.id_off = 0;
+    if (tmp.id_interval_secs < 60 || tmp.id_interval_secs > 600) tmp.id_interval_secs = HAM_ID_INTERVAL_SECS;
     _prefs = tmp;
     rebuildKeys();
   }
@@ -157,14 +163,37 @@ bool HamTxPolicy::isActive(const char* node_name) const {
   return inactiveReason(node_name) == NULL;
 }
 
-int8_t HamTxPolicy::selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm) {
+bool HamTxPolicy::isSelfAdvert(const mesh::Packet* pkt) const {
+  return _self_pub_key && pkt->getPayloadType() == PAYLOAD_TYPE_ADVERT
+      && pkt->payload_len >= PUB_KEY_SIZE
+      && memcmp(pkt->payload, _self_pub_key, PUB_KEY_SIZE) == 0;
+}
+
+int8_t HamTxPolicy::selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms) {
+  if (isSelfAdvert(pkt)) {
+    // every advert of ours carries our name (and callsign): restart the station ID timer
+    _last_id_ms = now_ms;
+    _id_queued_ms = 0;
+    _pub_since_id = false;
+    if (isActive(node_name)) _n_ids++;
+  }
   if (!isActive(node_name)) return default_dbm;
   if (classify(pkt) == HAM_TX_ENCRYPTED) {
     _n_enc++;
     return _prefs.enc_dbm;
   }
   _n_pub++;
+  if (!isSelfAdvert(pkt)) _pub_since_id = true;
   return _prefs.pub_dbm;
+}
+
+bool HamTxPolicy::isStationIdDue(const char* node_name, unsigned long now_ms) {
+  if (_prefs.id_off || !_pub_since_id || !isActive(node_name)) return false;
+  if (_id_queued_ms) {
+    if (now_ms - _id_queued_ms < 60000UL) return false;   // still waiting to go out
+    _id_queued_ms = 0;                                    // got lost, try again
+  }
+  return now_ms - _last_id_ms >= (unsigned long)_prefs.id_interval_secs * 1000UL;
 }
 
 int HamTxPolicy::findTag(const char* name) const {
@@ -228,8 +257,11 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
     int n = 0;
     for (int i = 0; i < HAM_MAX_TAGS; i++) if (_prefs.tags[i][0]) n++;
     if (why == NULL) {
-      sprintf(reply, "ON - callsign %s, public power %d, private power %d, extra channels %d",
-        _prefs.callsign, _prefs.pub_dbm, _prefs.enc_dbm, n);
+      char id_str[12];
+      if (_prefs.id_off) strcpy(id_str, "off");
+      else sprintf(id_str, "%u min", (_prefs.id_interval_secs + 30) / 60);
+      sprintf(reply, "ON - callsign %s, public power %d, private power %d, extra channels %d, ID %s",
+        _prefs.callsign, _prefs.pub_dbm, _prefs.enc_dbm, n, id_str);
     } else if (!_prefs.enabled) {
       sprintf(reply, "OFF - all packets use normal 'tx' power. Type: ham on");
     } else if (_prefs.callsign[0] == 0) {
@@ -239,7 +271,7 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
     }
 
   } else if (takeWord(p, "help")) {
-    strcpy(reply, "ham on|off, ham callsign X, ham public N, ham private N, "
+    strcpy(reply, "ham on|off, ham callsign X, ham public N, ham private N, ham id on|off|N, "
                   "ham channel add #x, ham channel remove #x, ham channels, ham stats");
 
   } else if (takeWord(p, "on")) {
@@ -326,8 +358,29 @@ bool HamTxPolicy::handleCommand(const char* command, char* reply, const char* no
       }
     }
 
+  } else if (takeWord(p, "id")) {
+    if (*p == 0) {
+      if (_prefs.id_off) strcpy(reply, "station ID is off");
+      else sprintf(reply, "station ID: advert every %u min while sending public traffic", (_prefs.id_interval_secs + 30) / 60);
+    } else if (takeWord(p, "off")) {
+      _prefs.id_off = 1; dirty = true;
+      strcpy(reply, "OK - station ID off. Only your normal adverts will go out");
+    } else if (takeWord(p, "on")) {
+      _prefs.id_off = 0; dirty = true;
+      sprintf(reply, "OK - station ID on, every %u min while sending public traffic", (_prefs.id_interval_secs + 30) / 60);
+    } else {
+      int mins = (*p >= '0' && *p <= '9') ? atoi(p) : 0;
+      if (mins < 1 || mins > 10) {
+        strcpy(reply, "Error: use 'ham id on', 'ham id off', or 'ham id N' (N = 1 to 10 minutes)");
+      } else {
+        _prefs.id_interval_secs = (mins == 10) ? 570 : mins * 60;   // 10 -> 9.5 min, keeps margin under the 10 min rule
+        dirty = true;
+        sprintf(reply, "OK - station ID every %d min while sending public traffic", mins);
+      }
+    }
+
   } else if (takeWord(p, "stats")) {
-    sprintf(reply, "Sent since boot: %lu public, %lu private", (unsigned long)_n_pub, (unsigned long)_n_enc);
+    sprintf(reply, "Sent since boot: %lu public, %lu private, %lu IDs", (unsigned long)_n_pub, (unsigned long)_n_enc, (unsigned long)_n_ids);
 
   } else {
     strcpy(reply, "Unknown ham command. Type: ham help");

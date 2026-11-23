@@ -1295,7 +1295,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 }
 
 void MyMesh::onBeforeTransmit(mesh::Packet* packet) {
-  int8_t dbm = ham.selectPower(packet, _prefs.node_name, _prefs.tx_power_dbm);
+  int8_t dbm = ham.selectPower(packet, _prefs.node_name, _prefs.tx_power_dbm, _ms->getMillis());
   if (dbm != ham_cur_dbm) {
     radio_driver.setTxPower(dbm);
     ham_cur_dbm = dbm;
@@ -1308,6 +1308,14 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
+
+  if (ham.isStationIdDue(_prefs.node_name, _ms->getMillis())) {   // ham station ID: zero-hop advert carries name/callsign
+    mesh::Packet* id_pkt = createSelfAdvert();
+    if (id_pkt) {
+      sendZeroHop(id_pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
+      ham.onStationIdQueued(_ms->getMillis());
+    }
+  }
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();

@@ -24,8 +24,11 @@
  *     'set tx' power.
  *   - Anything that can't be positively identified as public is ENCRYPTED.
  *
- * Adverts are left completely alone: this firmware sends no extra adverts. Station ID is
- * up to the operator (normal scheduled/manual adverts carry the node name and callsign).
+ * Station ID ("ham id", on by default): every advert carries the node name, and so the
+ * callsign. While ham mode is ON, if the node has sent anything at public power since its
+ * last advert, and 'id_interval_secs' (default 9 min) has passed since that last advert, the
+ * owner is asked to send a zero-hop advert. ANY self advert (scheduled, manual, or this one)
+ * restarts the timer. A node that hasn't sent public traffic sends no extra adverts at all.
  */
 
 #include <Arduino.h>   // needed for PlatformIO
@@ -45,6 +48,9 @@
     #define HAM_PUB_TX_POWER   20
   #endif
 #endif
+#ifndef HAM_ID_INTERVAL_SECS
+  #define HAM_ID_INTERVAL_SECS 540   // 9 min: a little under 10 so queue/channel delays can't push it over
+#endif
 #ifndef HAM_ENC_TX_POWER
   #define HAM_ENC_TX_POWER     10
 #endif
@@ -57,9 +63,9 @@ struct HamTxPrefs {
   uint8_t  enabled;
   int8_t   pub_dbm;
   int8_t   enc_dbm;
-  uint8_t  unused1;          // layout kept so existing /ham_prefs files still load
-  uint16_t unused2;
-  uint16_t unused3;
+  uint8_t  id_off;           // 1 = automatic station ID disabled
+  uint16_t id_interval_secs; // station ID interval (60..600)
+  uint16_t unused3;          // layout kept so existing /ham_prefs files still load
   char     callsign[HAM_CALLSIGN_MAX_LEN];
   char     tags[HAM_MAX_TAGS][HAM_TAG_MAX_LEN];
 };
@@ -76,7 +82,14 @@ class HamTxPolicy {
   KnownKey _tag_keys[HAM_MAX_TAGS];
 
   // stats
-  uint32_t _n_pub, _n_enc;
+  uint32_t _n_pub, _n_enc, _n_ids;
+
+  // station ID state
+  unsigned long _last_id_ms;     // when our last advert went out (0 = boot)
+  unsigned long _id_queued_ms;   // 0 = no ID waiting to go out
+  bool _pub_since_id;            // sent public traffic since our last advert?
+
+  bool isSelfAdvert(const mesh::Packet* pkt) const;
 
   void rebuildKeys();
   bool matchesKnownKey(const uint8_t* payload, int len) const;
@@ -104,7 +117,11 @@ public:
    * Called just before a packet goes on air. Returns the TX power (dBm) to use.
    * When not active, returns 'default_dbm'.
    */
-  int8_t selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm);
+  int8_t selectPower(const mesh::Packet* pkt, const char* node_name, int8_t default_dbm, unsigned long now_ms);
+
+  /** true when the owner should send a zero-hop self advert as the station ID */
+  bool isStationIdDue(const char* node_name, unsigned long now_ms);
+  void onStationIdQueued(unsigned long now_ms) { _id_queued_ms = now_ms ? now_ms : 1; }
 
   /**
    * Handles 'ham ...' CLI commands. Returns true if the command was a ham command (reply filled in).
