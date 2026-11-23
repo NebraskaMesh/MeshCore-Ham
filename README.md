@@ -1,128 +1,251 @@
-## About MeshCore
+# MeshCore Ham Firmware
 
-MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.
+**Stock MeshCore v1.18.0, plus one feature:** the radio uses a different transmit power depending on whether a packet is **public** (anyone can read it) or **private** (encrypted).
 
-## 🔍 What is MeshCore?
+That lets a licensed amateur radio operator send public traffic at **ham power** while private, encrypted traffic stays at a lower **unlicensed (Part 15) power**.
 
-MeshCore now supports a range of LoRa devices, allowing for easy flashing without the need to compile firmware manually. Users can flash a pre-built binary using tools like Adafruit ESPTool and interact with the network through a serial console.
-MeshCore provides the ability to create wireless mesh networks, similar to Meshtastic and Reticulum but with a focus on lightweight multi-hop packet routing for embedded projects. Unlike Meshtastic, which is tailored for casual LoRa communication, or Reticulum, which offers advanced networking, MeshCore balances simplicity with scalability, making it ideal for custom embedded solutions, where devices (nodes) can communicate over long distances by relaying messages through intermediate nodes. This is especially useful in off-grid, emergency, or tactical situations where traditional communication infrastructure is unavailable.
+- Works on **repeaters** and **room servers**, on every board stock MeshCore supports.
+- Fully compatible with stock MeshCore nodes and apps. Nothing changes for anyone else on the mesh.
+- **Off until you turn it on.** Until then, it behaves exactly like stock MeshCore.
 
-## ⚡ Key Features
+> This is a community fork of [MeshCore](https://github.com/meshcore-dev/MeshCore). The original MeshCore README is in [README-MeshCore.md](README-MeshCore.md).
 
-* Multi-Hop Packet Routing
-  * Devices can forward messages across multiple nodes, extending range beyond a single radio's reach.
-  * Supports up to a configurable number of hops to balance network efficiency and prevent excessive traffic.
-  * Nodes use fixed roles where "Companion" nodes are not repeating messages at all to prevent adverse routing paths from being used.
-* Supports LoRa Radios – Works with Heltec, RAK Wireless, and other LoRa-based hardware.
-* Decentralized & Resilient – No central server or internet required; the network is self-healing.
-* Low Power Consumption – Ideal for battery-powered or solar-powered devices.
-* Simple to Deploy – Pre-built example applications make it easy to get started.
+---
 
-## 🎯 What Can You Use MeshCore For?
+## Contents
 
-* Off-Grid Communication: Stay connected even in remote areas.
-* Emergency Response & Disaster Recovery: Set up instant networks where infrastructure is down.
-* Outdoor Activities: Hiking, camping, and adventure racing communication.
-* Tactical & Security Applications: Military, law enforcement, and private security use cases.
-* IoT & Sensor Networks: Collect data from remote sensors and relay it back to a central location.
+1. [How it works](#how-it-works)
+2. [What counts as public and what counts as private](#what-counts-as-public-and-what-counts-as-private)
+3. [Install the firmware](#install-the-firmware)
+4. [Set it up (5 steps)](#set-it-up-5-steps)
+5. [Command list](#command-list)
+6. [Check that it's working](#check-that-its-working)
+7. [Troubleshooting & FAQ](#troubleshooting--faq)
+8. [Other differences from stock MeshCore](#other-differences-from-stock-meshcore)
+9. [Your responsibility](#your-responsibility)
 
-## 🚀 How to Get Started
+---
 
-- Watch the [MeshCore QuickStart Playlist](https://www.youtube.com/watch?v=iaFltojJrAc&list=PLshzThxhw4O4WU_iZo3NmNZOv6KMrUuF9) by The Comms Channel
-- Watch the [MeshCore Technical Presentation](https://www.youtube.com/watch?v=OwmkVkZQTf4) by Liam Cottle.
-- Read through our [Frequently Asked Questions](./docs/faq.md) and [Documentation](https://docs.meshcore.io).
-- Flash the MeshCore firmware on a supported device.
-- Connect with a supported client.
+## How it works
 
-For developers:
+Right before your node sends **any** packet, the firmware looks at what kind of packet it is:
 
-- Install [PlatformIO](https://docs.platformio.org) in [Visual Studio Code](https://code.visualstudio.com).
-- Clone and open the MeshCore repository in Visual Studio Code.
-- See the example applications you can modify and run:
-  - [Companion Radio](./examples/companion_radio) - For use with an external chat app, over BLE, USB or Wi-Fi.
-  - [KISS Modem](./examples/kiss_modem) - Serial KISS protocol bridge for host applications. ([protocol docs](./docs/kiss_modem_protocol.md))
-  - [Simple Repeater](./examples/simple_repeater) - Extends network coverage by relaying messages.
-  - [Simple Room Server](./examples/simple_room_server) - A simple BBS server for shared Posts.
-  - [Simple Secure Chat](./examples/simple_secure_chat) - Secure terminal based text communication between devices.
-  - [Simple Sensor](./examples/simple_sensor) - Remote sensor node with telemetry and alerting.
-
-The Simple Secure Chat example can be interacted with through the Serial Monitor in Visual Studio Code, or with a Serial USB Terminal on Android.
-
-## ⚡️ MeshCore Flasher
-
-We have prebuilt firmware ready to flash on supported devices.
-
-- Launch https://meshcore.io/flasher
-- Select a supported device
-- Flash one of the firmware types:
-  - Companion, Repeater or Room Server
-- Once flashing is complete, you can connect with one of the MeshCore clients below.
-
-## 📱 MeshCore Clients
-
-**Companion Firmware**
-
-The companion firmware can be connected to via BLE, USB or Wi-Fi depending on the firmware type you flashed.
-
-- Web: https://app.meshcore.nz
-- Android: https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android
-- iOS: https://apps.apple.com/us/app/meshcore/id6742354151?platform=iphone
-- NodeJS: https://github.com/liamcottle/meshcore.js
-- Python: https://github.com/fdlamotte/meshcore-cli
-
-**Repeater and Room Server Firmware**
-
-The repeater and room server firmware can be set up via USB in the web config tool.
-
-- https://config.meshcore.io
-
-They can also be managed via LoRa in the mobile app by using the Remote Management feature.
-
-## 🛠 Hardware Compatibility
-
-MeshCore is designed for devices listed in the [MeshCore Flasher](https://meshcore.io/flasher)
-
-## 📜 License
-
-MeshCore is open-source software released under the MIT License. You are free to use, modify, and distribute it for personal and commercial projects.
-
-## Contributing
-
-Please submit PR's using 'dev' as the base branch!
-For minor changes just submit your PR and we'll try to review it, but for anything more 'impactful' please open an Issue first and start a discussion. It is better to sound out what it is you want to achieve first, and try to come to a consensus on what the best approach is, especially when it impacts the structure or architecture of this codebase.
-
-Here are some general principles you should try to adhere to:
-* Keep it simple. Please, don't think like a high-level lang programmer. Think embedded, and keep code concise, without any unnecessary layers.
-* No dynamic memory allocation, except during setup/begin functions.
-* Use the same brace and indenting style that's in the core source modules. (A .clang-format is probably going to be added soon, but please do NOT retroactively re-format existing code. This just creates unnecessary diffs that make finding problems harder)
-
-Help us prioritize! Please react with thumbs-up to issues/PRs you care about most. We look at reaction counts when planning work.
-
-### Running unit tests
-
-To run unit tests, run the following command:
-
-```bash
-pio test --environment native --verbose
+```
+            packet about to be sent
+                      │
+        Can anyone on the mesh read it?
+             │                   │
+            YES                  NO
+             │                   │
+     PUBLIC power          PRIVATE power
+   (e.g. ham power)      (e.g. Part 15 power)
 ```
 
-## Road-Map / To-Do
+This includes packets your node is only **passing along** for other people, which is most of what a repeater sends.
 
-There are a number of fairly major features in the pipeline, with no particular time-frames attached yet. In very rough chronological order:
-- [X] Companion radio: UI redesign
-- [X] Repeater + Room Server: add ACL's (like Sensor Node has)
-- [X] Standardise Bridge mode for repeaters
-- [ ] Repeater/Bridge: Standardise the Transport Codes for zoning/filtering
-- [X] Core + Repeater: enhanced zero-hop neighbour discovery
-- [ ] Core: round-trip manual path support
-- [ ] Companion + Apps: support for multiple sub-meshes (and 'off-grid' client repeat mode)
-- [ ] Core + Apps: support for LZW message compression
-- [ ] Core: dynamic CR (Coding Rate) for weak vs strong hops
-- [ ] Core: new framework for hosting multiple virtual nodes on one physical device
-- [ ] V2 protocol spec: discussion and consensus around V2 packet protocol, including path hashes, new encryption specs, etc
+If the firmware can't tell for sure that a packet is public, it treats it as **private**. That's the safe choice.
 
-## 📞 Get Support
+---
 
-- Report bugs and request features on the [GitHub Issues](https://github.com/meshcore-dev/meshcore/issues) page.
-- Find additional guides and components on [my site](https://buymeacoffee.com/ripplebiz).
-- Join [MeshCore Discord](https://meshcore.gg) to chat with the developers and get help from the community.
+## What counts as public and what counts as private
+
+| Sent at **PUBLIC** power | Sent at **PRIVATE** power |
+|---|---|
+| Messages on the **Public** channel | **Direct messages** (DMs) between two people |
+| Messages on **#hashtag channels you add** to the list | Messages on **private channels** (ones with a secret key) |
+| **Adverts** (a node announcing itself) | **#hashtag channels you have NOT added** |
+| **ACKs** (delivery receipts) | Logins, requests and replies (e.g. remote admin) |
+| **Traces** and **discovery** packets | Path updates, custom data, anything unrecognized |
+
+**Why is the Public channel "public" if MeshCore encrypts it?**
+The Public channel's key is published for everyone, so anyone can read it. The same goes for #hashtag channels: the key comes from the channel name, so anyone who knows the name can read them.
+
+**Why only the #hashtag channels I add?**
+The firmware can only check a #hashtag channel if it knows the channel's name. So you list the ones you want sent at public power.
+
+The firmware also checks each message against the real key before calling it public. A private channel that happens to look like the Public channel still goes out at private power.
+
+---
+
+## Install the firmware
+
+### Option A: Download a ready-made file (easiest)
+
+1. Go to this repository's **[Releases](../../releases)** page.
+2. Download the file for your board. Look for `_repeater` or `_room_server` in the name, for example `Station_G3_ESP32_repeater-....bin`.
+   - **ESP32 boards** (Heltec V3/V4, Station G2/G3, T-Beam, ...):
+     - Use the `-merged.bin` file for a first install or a full wipe.
+     - Use the plain `.bin` to update a board that already runs MeshCore.
+   - **nRF52 boards** (RAK4631, T-Echo, ...): use the `.uf2` file. Double-tap the reset button so the board shows up as a USB drive, then drag the file onto it.
+3. ESP32 boards: flash the `.bin` with a browser tool such as [Adafruit ESPTool](https://adafruit.github.io/Adafruit_WebSerial_ESPTool/). Flash a `-merged.bin` at address `0x0`. nRF52 boards: drag the `.uf2` as described above.
+
+### Option B: Build it yourself in VS Code
+
+1. Install [VS Code](https://code.visualstudio.com/) and the **PlatformIO IDE** extension.
+2. Download this repository: click the green **Code** button, then **Download ZIP**, and unzip it. Or clone it with git.
+3. In VS Code, choose **File → Open Folder** and pick the unzipped folder. The first time, PlatformIO takes a few minutes to download its tools.
+4. Click the **PlatformIO icon** (the ant head) on the left sidebar.
+5. Find your board's repeater or room server, for example **`Station_G3_ESP32_repeater`**, and click **Build**.
+6. Plug the board in by USB and click **Upload**.
+   - If the upload can't connect on an ESP32 board, hold the **BOOT** button while plugging in the USB cable, then try again.
+
+Your settings are **kept** when you update. Ham settings are saved in their own file, so going back to stock MeshCore is also safe.
+
+---
+
+## Set it up (5 steps)
+
+Connect to the node's **serial console**. Use any serial terminal at 115200 baud, PlatformIO's **Monitor** button, or log in as admin from the MeshCore app's remote management. Then type:
+
+**1. Put your callsign in the node's name.**
+Adverts carry the node name, so this is how your node identifies itself on air.
+```
+set name KF0WXX Waverly
+```
+
+**2. Tell the firmware your callsign.**
+```
+ham callsign KF0WXX
+```
+
+**3. Set the two power levels.**
+These use the same numbers as the normal `set tx` command.
+```
+ham public 22
+ham private 15
+```
+
+**4. (Optional) Add any #hashtag channels that should use public power.**
+```
+ham channel add #nebraska
+```
+
+**5. Turn it on and check.**
+```
+ham on
+ham
+```
+You should see:
+```
+ON - callsign KF0WXX, public power 22, private power 15, extra channels 1
+```
+
+If you see **`WAITING`** instead, the message says exactly what's missing. See [Troubleshooting](#troubleshooting--faq).
+
+---
+
+## Command list
+
+All commands start with `ham`. They work over the serial console and over remote admin. Every change is **saved immediately** and kept through reboots and firmware updates.
+
+| Command | What it does | Example |
+|---|---|---|
+| `ham` | Shows whether ham mode is **ON**, **OFF** or **WAITING**, plus your current settings. | `ham` |
+| `ham help` | Lists all the ham commands. | `ham help` |
+| `ham on` | Turns ham mode on. | `ham on` |
+| `ham off` | Turns ham mode off. Every packet then uses the normal `set tx` power, just like stock MeshCore. | `ham off` |
+| `ham callsign CALL` | Sets your callsign. It must also be part of the node name. Type `ham callsign` alone to see the current one. | `ham callsign KF0WXX` |
+| `ham public N` | Sets the power for **public** packets. N is -9 to 30, same as `set tx`. Type `ham public` alone to see the current value. | `ham public 22` |
+| `ham private N` | Sets the power for **private** (encrypted) packets. N is -9 to 30. Type `ham private` alone to see the current value. | `ham private 15` |
+| `ham channel add #name` | Sends that #hashtag channel at **public** power. Up to 8 channels. | `ham channel add #nebraska` |
+| `ham channel remove #name` | Takes a #hashtag channel off the list. It goes back to **private** power. | `ham channel remove #nebraska` |
+| `ham channels` | Lists every channel that uses public power. | `ham channels` |
+| `ham stats` | Shows how many public and private packets were sent since the last reboot. | `ham stats` |
+
+**What the status words mean:**
+
+| Status | Meaning |
+|---|---|
+| **ON** | Working. Public and private packets use their own power levels. |
+| **OFF** | Turned off with `ham off` (or never turned on). Every packet uses the normal `set tx` power. |
+| **WAITING** | You typed `ham on`, but something is missing: either no callsign is set, or the node name doesn't include the callsign. Until you fix it, every packet uses the normal `set tx` power. |
+
+<details>
+<summary>Older command names (still work)</summary>
+
+| Old | New |
+|---|---|
+| `ham call` | `ham callsign` |
+| `ham pub` | `ham public` |
+| `ham enc` | `ham private` |
+| `ham tag add` / `ham tag del` | `ham channel add` / `ham channel remove` |
+| `ham tags` | `ham channels` |
+| `ham status` | `ham` |
+
+</details>
+
+---
+
+## Check that it's working
+
+1. Type `ham` and make sure it says **ON**.
+2. Send one message on the **Public** channel and one **direct message** through the node.
+3. Type `ham stats`. Both the **public** and **private** counts should have gone up.
+4. If you have a power meter or SDR, you should see two different output levels.
+
+---
+
+## Troubleshooting & FAQ
+
+**`ham` says `WAITING - no callsign set`**
+Run `ham callsign YOURCALL`.
+
+**`ham` says `WAITING - node name must include ...`**
+The node name has to contain your callsign, for example `set name KF0WXX Waverly`. Upper or lower case doesn't matter.
+
+**My #hashtag channel still goes out at private power.**
+- Check `ham channels` to see whether it's on the list.
+- The name must match the app **exactly**, including capital letters: `#Nebraska` and `#nebraska` are different channels.
+
+**My board has an amplifier (Station G2/G3, 1 W boards). Are the numbers the real output power?**
+No. On those boards, the number is the drive level going into the amplifier, exactly like the normal `set tx`. Measure the real output with a meter and pick your two numbers from that.
+
+**Does this work on companion radios (the one paired to my phone)?**
+No, only repeaters and room servers. Your companion sends at its own normal power. Any repeater running this firmware still applies the public/private split when it **passes along** your companion's packets.
+
+**Will this confuse stock MeshCore nodes or apps?**
+No. Only the transmit power changes. The packets themselves are exactly the same.
+
+**How do I go back to stock behavior?**
+Type `ham off`, or flash stock MeshCore. Your normal settings are not affected.
+
+---
+
+## Other differences from stock MeshCore
+
+These are small changes that came up while running this firmware on a real network:
+
+- **Zero-hop advert interval defaults to 240 minutes** on new installs. The flood advert stays at 47 hours. Stock MeshCore sends a zero-hop advert every 2 minutes until you change it. Change yours any time with `set advert.interval` and `set flood.advert.interval`.
+- **Zero-hop adverts carry your 2- or 3-byte path setting.** In stock MeshCore, only flood adverts carry the `set path.hash.mode` setting, so zero-hop adverts always showed up as "1 byte" in analyzers. Now both kinds carry your setting.
+- **This firmware sends no extra adverts of its own.** Adverts go out only on your normal schedule, or when you send one manually.
+
+`ver` shows the firmware version as **`v1.18.0-ham`**.
+
+---
+
+## Your responsibility
+
+This firmware gives you the tools; how you use them is up to you. **It is not legal advice.**
+
+- Using ham power requires an amateur license. You, as the control operator, are responsible for following your country's rules. That includes station identification and what may and may not be encrypted.
+- Choose your private power level carefully, based on the unlicensed rules that apply where you are.
+- Classifying a packet as public or private is a best effort. It follows the table above.
+
+---
+
+### Credits & license
+
+Based on [MeshCore](https://github.com/meshcore-dev/MeshCore) by the MeshCore developers. MIT License, see [license.txt](license.txt).
+Ham power feature by KF0WXX for the [Nebraska Mesh](https://nebraskamesh.net) community.
+
+<details>
+<summary>For developers: where the code lives</summary>
+
+- `src/helpers/HamTxPolicy.h` / `.cpp`: decides public or private for each packet, the `ham` commands, and saving settings (to `/ham_prefs`).
+- `src/Dispatcher.h` / `.cpp`: adds the `onBeforeTransmit()` hook, which runs just before each packet is sent.
+- `src/Mesh.h` / `.cpp`: `sendZeroHop()` takes an optional path hash size.
+- `examples/simple_repeater/MyMesh.*`, `examples/simple_room_server/MyMesh.*`: connect the pieces together.
+
+Optional build flags to pre-load settings on fresh installs: `-D HAM_ENABLED=1`, `-D HAM_CALLSIGN='"KF0WXX"'`, `-D HAM_PUB_TX_POWER=22`, `-D HAM_ENC_TX_POWER=15`, `-D HAM_MAX_TAGS=8`.
+
+</details>

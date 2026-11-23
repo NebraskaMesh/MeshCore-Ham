@@ -714,24 +714,28 @@ void Mesh::sendDirect(Packet* packet, const uint8_t* path, uint8_t path_len, uin
   sendPacket(packet, pri, delay_millis);
 }
 
-void Mesh::sendZeroHop(Packet* packet, uint32_t delay_millis) {
+void Mesh::sendZeroHop(Packet* packet, uint32_t delay_millis, uint8_t path_hash_size) {
   packet->header &= ~PH_ROUTE_MASK;
   packet->header |= ROUTE_TYPE_DIRECT;
 
-  packet->path_len = 0;  // path_len of zero means Zero Hop
+  // hash count of zero means Zero Hop; the hash-size bits just tell receivers our path hash mode
+  if (path_hash_size < 1 || path_hash_size > 3) path_hash_size = 1;
+  packet->setPathHashSizeAndCount(path_hash_size, 0);
 
   _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
 
   sendPacket(packet, 0, delay_millis);
 }
 
-void Mesh::sendZeroHop(Packet* packet, uint16_t* transport_codes, uint32_t delay_millis) {
+void Mesh::sendZeroHop(Packet* packet, uint16_t* transport_codes, uint32_t delay_millis, uint8_t path_hash_size) {
   packet->header &= ~PH_ROUTE_MASK;
   packet->header |= ROUTE_TYPE_TRANSPORT_DIRECT;
   packet->transport_codes[0] = transport_codes[0];
   packet->transport_codes[1] = transport_codes[1];
 
-  packet->path_len = 0;  // path_len of zero means Zero Hop
+  // hash count of zero means Zero Hop; the hash-size bits just tell receivers our path hash mode
+  if (path_hash_size < 1 || path_hash_size > 3) path_hash_size = 1;
+  packet->setPathHashSizeAndCount(path_hash_size, 0);
 
   _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
 

@@ -658,7 +658,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.cr = LORA_CR;
   _prefs.tx_power_dbm = LORA_TX_POWER;
   _prefs.disable_fwd = 1;
-  _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
+  _prefs.advert_interval = 120;      // zero-hop advert every 240 min (stock max) for NEW installs
   _prefs.flood_advert_interval = 47; // 47 hours
   _prefs.flood_max = 64;
   _prefs.flood_max_unscoped = 64;
@@ -698,6 +698,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
+  ham.begin(self_id.pub_key);
+  ham.load(_fs);
 
   acl.load(_fs, self_id);
   region_map.load(_fs);
@@ -724,6 +726,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
+  ham_cur_dbm = _prefs.tx_power_dbm;
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
 
   board.attachDynamicPrefs(_prefs.getCustom());
@@ -799,7 +802,7 @@ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
     if (flood) {
       sendFloodScoped(default_scope, pkt, delay_millis, _prefs.path_hash_mode + 1);
     } else {
-      sendZeroHop(pkt, delay_millis);
+      sendZeroHop(pkt, delay_millis, _prefs.path_hash_mode + 1);
     }
   } else {
     MESH_DEBUG_PRINTLN("ERROR: unable to create advertisement packet!");
@@ -839,6 +842,7 @@ void MyMesh::dumpLogFile() {
 
 void MyMesh::setTxPower(int8_t power_dbm) {
   radio_driver.setTxPower(power_dbm);
+  ham_cur_dbm = power_dbm;
 }
 
 bool MyMesh::setRxBoostedGain(bool enable) {
@@ -985,8 +989,20 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     }
   } else if (memcmp(command, "set repeat on", 13) == 0) {
     strcpy(reply, "ERR - repeat now deprecated");
+  } else if (memcmp(command, "ham", 3) == 0 && (command[3] == 0 || command[3] == ' ')) {
+    bool dirty = false;
+    ham.handleCommand(command, reply, _prefs.node_name, dirty);
+    if (dirty && !ham.save(_fs)) strcpy(reply, "Err - failed to save ham prefs");
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
+  }
+}
+
+void MyMesh::onBeforeTransmit(mesh::Packet* packet) {
+  int8_t dbm = ham.selectPower(packet, _prefs.node_name, _prefs.tx_power_dbm);
+  if (dbm != ham_cur_dbm) {
+    radio_driver.setTxPower(dbm);
+    ham_cur_dbm = dbm;
   }
 }
 
@@ -1049,7 +1065,7 @@ void MyMesh::loop() {
     updateAdvertTimer();      // also schedule local advert (so they don't overlap)
   } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
-    if (pkt) sendZeroHop(pkt);
+    if (pkt) sendZeroHop(pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
 
     updateAdvertTimer(); // schedule next local advert
   }

@@ -28,6 +28,7 @@
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/ClientACL.h>
 #include <helpers/CommonCLI.h>
+#include <helpers/HamTxPolicy.h>
 #include <helpers/IdentityStore.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
@@ -71,7 +72,7 @@ struct NeighbourInfo {
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.18.0"
+  #define FIRMWARE_VERSION   "v1.18.0-ham"
 #endif
 
 #define FIRMWARE_ROLE "repeater"
@@ -87,6 +88,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   NodePrefs _prefs;
   ClientACL  acl;
   CommonCLI _cli;
+  HamTxPolicy ham;          // per-packet TX power for Part 97 / Part 15 split
+  int8_t ham_cur_dbm;       // power currently programmed into the radio
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   uint8_t reply_path[MAX_PATH_SIZE];
   uint8_t reply_path_len;
@@ -128,6 +131,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
 
 protected:
+  void onBeforeTransmit(mesh::Packet* packet) override;
+
   float getAirtimeBudgetFactor() const override {
     return _prefs.airtime_factor;
   }
