@@ -48,7 +48,7 @@ If the firmware can't tell for sure that a packet is public, it treats it as **p
 
 **Built-in safety checks:**
 
-- **Your callsign must really go out on air.** Adverts only have room for the first 31 characters of the node name (23 if you share your location). Ham mode only switches on if your callsign is inside the part adverts actually send, and it has to be a whole word, so `KF0WXX` doesn't count inside `KF0WXXX`.
+- **Your callsign must really go out on air.** Adverts only have room for the first 31 characters of the node name (23 if you share your location). Ham mode only switches on if your callsign is inside the part adverts actually send, and it has to be a whole word, so `N0CALL` doesn't count inside `N0CALLS`.
 - **Private packets never go out at the wrong power.** The firmware sets the power before every packet. If the radio refuses the private power level, that private packet is **dropped instead of sent**, and `ham` shows a warning.
 - **Damaged settings turn ham mode off.** Settings are saved twice with a checksum. If one copy gets damaged (for example by a power cut while saving), the other is used. If both are damaged, ham mode stays **OFF** until you set it up again.
 
@@ -129,15 +129,17 @@ Your settings are **kept** when you update. Ham settings are saved in their own 
 
 Connect to the node's **serial console**. Use any serial terminal at 115200 baud, PlatformIO's **Monitor** button, or log in as admin from the MeshCore app's remote management. Then type:
 
+> In all examples, replace **`N0CALL`** with your own callsign and **`Hilltop`** with whatever you want to call your node.
+
 **1. Put your callsign in the node's name, near the start.**
 Adverts carry the node name, so this is how your node identifies itself on air. Adverts cut long names short (31 characters, or 23 with location), so put the callsign first.
 ```
-set name KF0WXX Waverly
+set name N0CALL Hilltop
 ```
 
 **2. Tell the firmware your callsign.**
 ```
-ham callsign KF0WXX
+ham callsign N0CALL
 ```
 
 **3. Set the two power levels.**
@@ -159,7 +161,7 @@ ham
 ```
 You should see:
 ```
-ON - callsign KF0WXX, public power 22, private power 15, extra channels 1, ID 9 min
+ON - callsign N0CALL, public power 22, private power 15, extra channels 1, ID 9 min
 ```
 
 If you see **`WAITING`** instead, the message says exactly what's missing. See [Troubleshooting](#troubleshooting--faq).
@@ -176,7 +178,7 @@ All commands start with `ham`. They work over the serial console and over remote
 | `ham help` | Lists all the ham commands. | `ham help` |
 | `ham on` | Turns ham mode on. | `ham on` |
 | `ham off` | Turns ham mode off. Every packet then uses the normal `set tx` power, just like stock MeshCore. | `ham off` |
-| `ham callsign CALL` | Sets your callsign. It must also be part of the node name. Type `ham callsign` alone to see the current one. | `ham callsign KF0WXX` |
+| `ham callsign CALL` | Sets your callsign. It must also be part of the node name. Type `ham callsign` alone to see the current one. | `ham callsign N0CALL` |
 | `ham public N` | Sets the power for **public** packets. N is -9 to 30, same as `set tx`. Type `ham public` alone to see the current value. | `ham public 22` |
 | `ham private N` | Sets the power for **private** (encrypted) packets. N is -9 to 30. Type `ham private` alone to see the current value. | `ham private 15` |
 | `ham channel add #name` | Sends that #hashtag channel at **public** power. Up to 8 channels. | `ham channel add #nebraska` |
@@ -226,10 +228,10 @@ All commands start with `ham`. They work over the serial console and over remote
 Run `ham callsign YOURCALL`.
 
 **`ham` says `WAITING - node name must include ...`**
-The node name has to contain your callsign as its own word, for example `set name KF0WXX Waverly`. Upper or lower case doesn't matter.
+The node name has to contain your callsign as its own word, for example `set name N0CALL Hilltop`. Upper or lower case doesn't matter.
 
 **`ham` says `... gets cut off in adverts`**
-Your name is too long, so adverts drop the end of it, including your callsign. Move the callsign to the start: `set name KF0WXX Waverly Backbone`.
+Your name is too long, so adverts drop the end of it, including your callsign. Move the callsign to the start: `set name N0CALL Hilltop Backbone`.
 
 **`ham` shows `WARNING: ... private pkts blocked`**
 The radio refused your private power setting, so the node dropped those private packets rather than risk sending them at ham power. Pick a value your board supports, for example `ham private 10`.
@@ -283,7 +285,7 @@ This firmware gives you the tools; how you use them is up to you. **It is not le
 ### Credits & license
 
 Based on [MeshCore](https://github.com/meshcore-dev/MeshCore) by the MeshCore developers. MIT License, see [license.txt](license.txt).
-Ham power feature by KF0WXX for the [Nebraska Mesh](https://nebraskamesh.net) community.
+Ham power feature by the [Nebraska Mesh](https://nebraskamesh.net) community.
 The whole-word callsign check, the advert-name length check, blocking private packets when the radio rejects a power change, and checksummed settings were inspired by [jhuebert's repeater-filter firmware](https://github.com/jhuebert/MeshCore), which adapted this ham mode.
 
 <details>
@@ -295,6 +297,6 @@ The whole-word callsign check, the advert-name length check, blocking private pa
 - `src/Mesh.h` / `.cpp`: `sendZeroHop()` takes an optional path hash size.
 - `examples/simple_repeater/MyMesh.*`, `examples/simple_room_server/MyMesh.*`: connect the pieces together.
 
-Optional build flags to pre-load settings on fresh installs: `-D HAM_ENABLED=1`, `-D HAM_CALLSIGN='"KF0WXX"'`, `-D HAM_PUB_TX_POWER=22`, `-D HAM_ENC_TX_POWER=15`, `-D HAM_ID_INTERVAL_SECS=540`, `-D HAM_MAX_TAGS=8`.
+Optional build flags to pre-load settings on fresh installs: `-D HAM_ENABLED=1`, `-D HAM_CALLSIGN='"N0CALL"'`, `-D HAM_PUB_TX_POWER=22`, `-D HAM_ENC_TX_POWER=15`, `-D HAM_ID_INTERVAL_SECS=540`, `-D HAM_MAX_TAGS=8`.
 
 </details>

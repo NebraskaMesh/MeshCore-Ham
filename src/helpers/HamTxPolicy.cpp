@@ -15,7 +15,7 @@ static const uint8_t PUBLIC_CHANNEL_KEY[16] = {
 };
 
 // true if 'word' appears in 'text' as a whole word (case-insensitive): the characters
-// before and after it must not be letters or digits, so KF0WXX doesn't match KF0WXXX.
+// before and after it must not be letters or digits, so N0CALL doesn't match N0CALLS.
 static bool containsWordNoCase(const char* text, const char* word) {
   size_t n = strlen(word);
   if (n == 0 || text == NULL) return false;
